@@ -1,0 +1,167 @@
+#!/usr/bin/python3
+import requests
+import nmap
+import time
+import smtplib,ssl
+import getpass
+import os
+import ctypes
+import subprocess
+from cryptography.fernet import Fernet
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from mss import mss
+archivo = ("HOLA")
+#ip= input("Ingres ala IP que quieres escanear")#solicita la ip a escanear
+ip='192.168.150.1'
+ 
+#Inicio de escaneo de puertos
+nm = nmap.PortScanner()
+puertos_abiertos="-p "
+results = nm.scan(hosts=ip,arguments="-sT -n -Pn -T4")#Escanea todo los puertos de la ip 
+count=0
+
+#print (results)
+print("\nHost : %s" % ip)#Imprime la IP escameada 
+print("State : %s" % nm[ip].state()) #Imprime el estado de la IP 
+
+
+for proto in nm[ip].all_protocols():
+    print("Protocol : %s" % proto)#Revisa el tipo de protocoloa
+    print()
+    lport = nm[ip][proto].keys()
+    sorted(lport)
+
+    #Empieza a imprimir todo los resulltados de la ip
+    for port in lport:
+        print ("port : %s\tstate : %s" % (port, nm[ip][proto][port]["state"]))
+        if count==0:
+            puertos_abiertos=puertos_abiertos+str(port)             
+            count=1
+        else:
+            puertos_abiertos=puertos_abiertos+","+str(port)
+
+    print("\nPuertos abiertos: "+ puertos_abiertos +" de la ip "+str(ip))
+    archivo=ip+'\n'+"State : %s" % nm[ip].state()+'\n'+"Protocol : %s" % proto+'\n'+puertos_abiertos#Variable donde almacena la info 
+    #imprime los puertos abiertos de la IP 
+
+
+#interactuamos con powershell para obtener los procesos
+comando = "Get-Process"
+#creaamos una cadena de comando de PowerShell con la variable comando utilizando 
+#la opción -ExecutionPolicy Bypass, lo que nos permite ejecutar el comando sin restricciones de política de ejecución.
+lineaPS = "powershell -Executionpolicy ByPass -Command "+ comando
+#ejecutamos el comando de powershell
+runningProcesses = subprocess.check_output(lineaPS)
+#verifica si en la variable archivo hay información y si la hay hace un salto de linea y después añade la información
+#de los procesos
+if archivo != "":
+    archivo += "\n"
+archivo += runningProcesses.decode()
+
+
+# Definimos la clave de cifrado
+clave = Fernet.generate_key()
+archivo_cifrado = Fernet(clave).encrypt(archivo.encode())
+# Se crea un txt en el escritorio y encripta la información dentro del archivo
+ruta_archivo = os.path.join(os.path.expanduser("~"), "OneDrive/Escritorio", "puertos_cifrados.txt")
+
+with open(ruta_archivo, "wb") as archivo:
+    archivo.write(archivo_cifrado)
+# Peticion de datos para el inicio de sesion
+correo_de_usuario = input("Ingresar tu correo: ")
+contraseña = getpass.getpass("Ingresa la contraseña: ")
+destinatario = input("Ingrese destinatario: ")
+asunto = input("Ingrese asunto: ")
+
+
+# Creacion de un mensaje en HTML
+mensaje = MIMEMultipart("alternative")
+mensaje["Subject"] = asunto
+mensaje["From"] = correo_de_usuario
+mensaje["To"] = destinatario
+html = """
+<html>
+<body>
+    <b> Aqui está su reporte </b><br><br>
+    De escaneo de puertos<br><br>
+    <b>Añadido:</b> una ss<br><br>
+    <b>Porque?:</b> Para corroborar que se ejecuto el codigo<br>
+</body>
+</html>
+"""
+parte_html = MIMEText(html, "html")
+# Agregar el HTML al mensaje
+mensaje.attach(parte_html)
+# The simplest use, save a screen shot of the 1st monitor
+with mss() as sct:
+    img=sct.shot()
+# Codificacion de la imagen de forma estandar
+with open(img, "rb") as adjunto_imagen:
+    contenido_adjunto_imagen = MIMEBase("application", "octet-stream")
+    contenido_adjunto_imagen.set_payload(adjunto_imagen.read())
+encoders.encode_base64(contenido_adjunto_imagen)
+contenido_adjunto_imagen.add_header(
+    "Content-Disposition",
+    f"attachment; filename=imagen.png",
+)
+# Agregar la imagen codificada al mensaje
+mensaje.attach(contenido_adjunto_imagen)
+
+#hacemos que la variable ruta_archivo apunte al archivo txt puertos_cifrados para poderlo codificar y agregar al mensaje
+ruta_archivo = os.path.join(os.path.expanduser("~"), "OneDrive/Escritorio", "puertos_cifrados.txt")
+with open(ruta_archivo, "rb") as adjunto_txt:
+    contenido_adjunto_txt = MIMEBase("application", "octet-stream")
+    contenido_adjunto_txt.set_payload(adjunto_txt.read())
+
+encoders.encode_base64(contenido_adjunto_txt)
+contenido_adjunto_txt.add_header(
+    "Content-Disposition",
+    f"attachment; filename=puertos_cifrados.txt",
+)
+
+mensaje.attach(contenido_adjunto_txt)
+mensaje_final = mensaje.as_string()
+#Se envia el correo
+context = ssl.create_default_context()
+with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+    server.login(correo_de_usuario, contraseña)
+    server.sendmail(correo_de_usuario, destinatario, mensaje_final)
+
+
+dll_handle = ctypes.WinDLL("User32.dll")
+k_handle = ctypes.WinDLL("Kernel32.dll")
+
+hWnd = None
+lpText = "El escaneo se ha realizado, revisa los resultados en tu correo"
+lpCaption = '!!ATENCION¡¡'
+uType = 0x00000001
+
+response = dll_handle.MessageBoxW(hWnd, lpText, lpCaption, uType)
+error = k_handle.GetLastError()
+if error != 0:
+    print("Error Code: {0}".format(error))
+    exit(1)
+
+if response == 1:
+    print("Clicked OK!")
+elif response == 2:
+    print("User Exited!")
+
+time.sleep(5)
+#como el archivo con la información se queda en el escritorio, entonces tenemos que borrarlo
+borrarcoso = os.path.join(os.path.expanduser("~"), "OneDrive/Escritorio", "puertos_cifrados.txt")
+# Verifica si el archivo existe
+if os.path.isfile(borrarcoso):
+# Elimina el archivo
+    os.remove(borrarcoso)
+    print("Archivo eliminado exitosamente.")
+else:
+    print("El archivo no existe en el directorio actual del usuario.")
+
+#Autores:
+#adrien.ruisocns@uanl.edu.mx
+#antonio.senacst@uanl.edu.mx
+#jaime.calderonsn@uanl.edu.mx
