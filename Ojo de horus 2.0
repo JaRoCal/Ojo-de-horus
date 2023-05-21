@@ -1,0 +1,236 @@
+#!/usr/bin/python3
+import requests
+import nmap
+import time
+import smtplib,ssl
+import getpass
+import os
+import ctypes
+import subprocess
+from cryptography.fernet import Fernet
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from mss import mss
+import argparse
+import logging
+import sphinx
+
+archivo = "" #variable global que se utilizará en varias funciones
+# Configuramos el logger
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+#Definimos la función scan_puertos
+def scan_puertos(ip):
+    global archivo
+    #Inicio de escaneo de puertos
+    nm = nmap.PortScanner()
+    puertos_abiertos="-p "
+    results = nm.scan(hosts=ip,arguments="-sT -n -Pn -T4")#Escanea todo los puertos de la ip 
+    count=0
+
+    #print (results)
+    logging.info("\nHost : %s" % ip)#Imprime la IP escameada 
+    logging.info("State : %s" % nm[ip].state()) #Imprime el estado de la IP 
+
+
+    for proto in nm[ip].all_protocols():
+        logging.info("Protocol : %s" % proto)#Revisa el tipo de protocoloa
+        
+        lport = nm[ip][proto].keys()
+        sorted(lport)
+
+        #Empieza a imprimir todo los resulltados de la ip
+        for port in lport:
+            logging.info("port : %s\tstate : %s" % (port, nm[ip][proto][port]["state"]))
+            if count==0:
+                puertos_abiertos=puertos_abiertos+str(port)             
+                count=1
+            else:
+                puertos_abiertos=puertos_abiertos+","+str(port)
+
+    logging.info("\nPuertos abiertos: "+ puertos_abiertos +" de la ip "+str(ip))
+    archivo=ip+'\n'+"State : %s" % nm[ip].state()+'\n'+"Protocol : %s" % proto+'\n'+puertos_abiertos#Variable donde almacena la info 
+     
+
+#Definimos la función obtener_procesos
+def obtener_procesos():
+    global archivo
+    logging.info("Obteniendo procesos")
+    #interactuamos con powershell para obtener los procesos
+    comando = "Get-Process"
+    #creaamos una cadena de comando de PowerShell con la variable comando utilizando 
+    #la opción -ExecutionPolicy Bypass, lo que nos permite ejecutar el comando sin restricciones de política de ejecución.
+    lineaPS = "powershell -Executionpolicy ByPass -Command "+ comando
+    #ejecutamos el comando de powershell
+    runningProcesses = subprocess.check_output(lineaPS)
+    #verifica si en la variable archivo hay información y si la hay hace un salto de linea y después añade la información
+    #de los procesos
+    if archivo != "":
+        archivo += "\n"
+    archivo += runningProcesses.decode()
+    logging.info("Procesos obtenidos exitosamente")
+
+#Definimos la función cifrar_archivos
+def cifrar_archivo(archivo):
+    logging.info("Cifrando archivo")
+    # Definimos la clave de cifrado
+    clave = Fernet.generate_key()
+    archivo_cifrado = Fernet(clave).encrypt(archivo.encode())
+    # Se crea un txt en el escritorio y encripta la información dentro del archivo
+    ruta_archivo = os.path.join(os.path.expanduser("~"), "OneDrive/Escritorio", "puertos_cifrados.txt")
+
+    with open(ruta_archivo, "wb") as archivo:
+        archivo.write(archivo_cifrado)
+    logging.info("Archivo cifrado exitosamente")
+#Definimos la función enviar_correo
+def enviar_correo(correo_de_usuario, contraseña, destinatario, asunto):
+    global archivo
+    logging.info("Enviando correo")
+    # Creacion de un mensaje en HTML
+    mensaje = MIMEMultipart("alternative")
+    mensaje["Subject"] = asunto
+    mensaje["From"] = correo_de_usuario
+    mensaje["To"] = destinatario
+    html = """
+    <html>
+    <body>
+        <b> Aqui está su reporte </b><br><br>
+        De escaneo de puertos<br><br>
+        <b>Añadido:</b> una ss<br><br>
+        <b>Porque?:</b> Para corroborar que se ejecuto el codigo<br>
+    </body>
+    </html>
+    """
+    parte_html = MIMEText(html, "html")
+    # Agregar el HTML al mensaje
+    mensaje.attach(parte_html)
+    # The simplest use, save a screen shot of the 1st monitor
+    with mss() as sct:
+        img= sct.shot()
+    # Codificacion de la imagen de forma estandar
+    with open(img, "rb") as adjunto_imagen:
+        contenido_adjunto_imagen = MIMEBase("application", "octet-stream")
+        contenido_adjunto_imagen.set_payload(adjunto_imagen.read())
+    encoders.encode_base64(contenido_adjunto_imagen)
+    contenido_adjunto_imagen.add_header(
+        "Content-Disposition",
+        f"attachment; filename=imagen.png",
+    )
+    # Agregar la imagen codificada al mensaje
+    mensaje.attach(contenido_adjunto_imagen)
+
+    #hacemos que la variable ruta_archivo apunte al archivo txt puertos_cifrados para poderlo codificar y agregar al mensaje
+    ruta_archivo = os.path.join(os.path.expanduser("~"), "OneDrive/Escritorio", "puertos_cifrados.txt")
+    with open(ruta_archivo, "rb") as adjunto_txt:
+        contenido_adjunto_txt = MIMEBase("application", "octet-stream")
+        contenido_adjunto_txt.set_payload(adjunto_txt.read())
+
+    encoders.encode_base64(contenido_adjunto_txt)
+    contenido_adjunto_txt.add_header(
+        "Content-Disposition",
+        f"attachment; filename=puertos_cifrados.txt",
+    )
+
+    mensaje.attach(contenido_adjunto_txt)
+    mensaje_final = mensaje.as_string()
+    #Se envia el correo
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+        server.login(correo_de_usuario, contraseña)
+        server.sendmail(correo_de_usuario, destinatario, mensaje_final)
+    logging.info("Correo enviado exitosamente")
+
+
+#Definimos la función mostrar_mensaje utilizando WinApi para que interactue con el equipo
+def mostrar_mensaje():
+    logging.info("Mostrando mensaje")
+    dll_handle = ctypes.WinDLL("User32.dll")
+    k_handle = ctypes.WinDLL("Kernel32.dll")
+
+    hWnd = None
+    lpText = "El escaneo se ha realizado, revisa los resultados en tu correo"
+    lpCaption = '!!ATENCION¡¡'
+    uType = 0x00000001
+
+    response = dll_handle.MessageBoxW(hWnd, lpText, lpCaption, uType)
+    error = k_handle.GetLastError()
+    if error != 0:
+        logging.error("Error Code: {0}".format(error))
+        exit(1)
+
+    if response == 1:
+        logging.info("Clicked OK!")
+    elif response == 2:
+        logging.info("User Exited!")
+    time.sleep(5)
+#Definimos la función borrar_archivos
+def borrar_archivo():
+    logging.info("Borrando archivo")
+    #como el archivo con la información se queda en el escritorio, entonces tenemos que borrarlo
+    borrarcoso = os.path.join(os.path.expanduser("~"), "OneDrive/Escritorio", "puertos_cifrados.txt")
+    # Verifica si el archivo existe
+    if os.path.isfile(borrarcoso):
+        # Elimina el archivo
+        os.remove(borrarcoso)
+        logging.info("Archivo eliminado exitosamente.")
+    else:
+        logging.info("El archivo no existe en el directorio actual del usuario.")
+#if '__name__ == '__main__': es una convención en Python que verifica si el script está siendo ejecutado directamente
+#Esto se hace para que el código dentro de este bloque solo se ejecute cuando ejecutas este archivo directamente.
+if __name__ == '__main__':
+    # crea un objeto ArgumentParser de la biblioteca argparse
+    parser = argparse.ArgumentParser(description='Escaneo de puertos y envío de correo')
+    #Todas Las líneas parser.add_argument(...) agregan los argumentos esperados al ArgumentParser. 
+    #En este caso, el script espera recibir los siguientes argumentos:
+    #--ip: la dirección IP que se va a escanear.
+    #--correo: el correo del remitente.
+    #--destinatario: el correo del destinatario.
+    #--asunto: el asunto del correo.
+    parser.add_argument('--ip', required=True, help='IP a escanear')
+    parser.add_argument('--correo', required=True, help='Correo del remitente')
+    parser.add_argument('--destinatario', required=True, help='Correo del destinatario')
+    parser.add_argument('--asunto', required=True, help='Asunto del correo')
+    #analiza los argumentos de la línea de comandos y los almacena en el objeto args.
+    args = parser.parse_args()
+
+    ip = args.ip
+    correo_de_usuario = args.correo
+    destinatario = args.destinatario
+    asunto = args.asunto
+
+    # Configurar el logger para escribir en un archivo
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
+                        filename='log.txt', filemode='w')
+
+
+    try:
+        # realiza un escaneo de puertos en la dirección IP especificada.
+        scan_puertos(ip)
+        #obtiene una lista de los procesos en ejecución en el sistema.
+        obtener_procesos()
+        #cifra un archivo 
+        cifrar_archivo(archivo)
+        #solicita al usuario que ingrese una contraseña de forma segura (no se muestra en pantalla).
+        contraseña = 'ympqnnwpjylzgwbm'
+        #envía un correo electrónico con los resultados del escaneo, el archivo cifrado adjunto y la ss 
+        # donde demuestra que se realizo la ejecución del código, tambien adjunta.
+        enviar_correo(correo_de_usuario, contraseña, destinatario, asunto)
+        #muestra un mensaje emergente en Windows para indicar que el escaneo de puertos
+        # se ha completado y el correo se ha enviado correctamente.
+        mostrar_mensaje()
+        #borra el archivo del escritorio
+        borrar_archivo()
+    except Exception as e:
+        logging.error("Ocurrió un error: {0}".format(str(e)))
+#Definimos la función para generar la documentación
+def crear_documentacion():
+    #Abre el archivo y lee su contenido donde tenemos los comandos
+    with open('SPHINX.txt', 'r') as file:
+        lineas = file.readlines()
+    #Ejecuta los comandos linea por linea
+    for linea in lineas:
+        comando = linea.strip() 
+        subprocess.run(comando, shell=True)
+#Se crea la documentación mandando a llamar la función crear_documentacion()
+crear_documentacion()
