@@ -212,7 +212,7 @@ if __name__ == '__main__':
         #cifra un archivo 
         cifrar_archivo(archivo)
         #solicita al usuario que ingrese una contraseña de forma segura (no se muestra en pantalla).
-        contraseña = 'ympqnnwpjylzgwbm'
+        contraseña = getpass.getpass("Ingrese la comntraseña: ")
         #envía un correo electrónico con los resultados del escaneo, el archivo cifrado adjunto y la ss 
         # donde demuestra que se realizo la ejecución del código, tambien adjunta.
         enviar_correo(correo_de_usuario, contraseña, destinatario, asunto)
