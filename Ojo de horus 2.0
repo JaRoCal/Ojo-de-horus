@@ -234,3 +234,9 @@ def crear_documentacion():
         subprocess.run(comando, shell=True)
 #Se crea la documentación mandando a llamar la función crear_documentacion()
 crear_documentacion()
+
+
+#Autores:
+#adrien.ruisocns@uanl.edu.mx
+#antonio.senacst@uanl.edu.mx
+#jaime.calderonsn@uanl.edu.mx
